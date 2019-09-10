@@ -1,0 +1,32 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/menethis/work/dlib-android/third_party/miniglog/glog/./logging.h
+android/log.h
+-
+algorithm
+-
+ctime
+-
+fstream
+-
+iostream
+-
+set
+-
+sstream
+-
+string
+-
+vector
+-
+
+/home/menethis/work/dlib-android/third_party/miniglog/glog/logging.cc
+./logging.h
+/home/menethis/work/dlib-android/third_party/miniglog/glog/./logging.h
+

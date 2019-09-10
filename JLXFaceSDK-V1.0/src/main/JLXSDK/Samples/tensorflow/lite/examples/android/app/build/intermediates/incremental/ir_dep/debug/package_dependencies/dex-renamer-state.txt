@@ -1,0 +1,4 @@
+#Wed Jun 19 17:06:58 CST 2019
+base.0=/home/work/githubSave/tensorflow/tensorflow/lite/examples/android/app/build/intermediates/transforms/dexMerger/debug/10
+path.0=classes.dex
+renamed.0=classes.dex

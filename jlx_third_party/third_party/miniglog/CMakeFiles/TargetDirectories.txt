@@ -1,0 +1,7 @@
+/home/menethis/work/dlib-android/third_party/miniglog/CMakeFiles/install/strip.dir
+/home/menethis/work/dlib-android/third_party/miniglog/CMakeFiles/install/local.dir
+/home/menethis/work/dlib-android/third_party/miniglog/CMakeFiles/miniglog.dir
+/home/menethis/work/dlib-android/third_party/miniglog/CMakeFiles/install.dir
+/home/menethis/work/dlib-android/third_party/miniglog/CMakeFiles/list_install_components.dir
+/home/menethis/work/dlib-android/third_party/miniglog/CMakeFiles/edit_cache.dir
+/home/menethis/work/dlib-android/third_party/miniglog/CMakeFiles/rebuild_cache.dir

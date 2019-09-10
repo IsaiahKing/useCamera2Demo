@@ -35,4 +35,5 @@ public interface Camera2Listener {
      */
     void onCameraError(Exception e);
 
+    void onPreviewData(byte[] nv21,Size previewSize);
 }

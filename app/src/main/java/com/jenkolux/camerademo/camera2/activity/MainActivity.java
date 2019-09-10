@@ -2,6 +2,7 @@ package com.jenkolux.camerademo.camera2.activity;
 
 
 import android.Manifest;
+import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -9,11 +10,16 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
+import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.YuvImage;
 import android.hardware.camera2.CameraDevice;
+import android.media.AudioManager;
 import android.os.Bundle;
+import android.os.Environment;
+import android.os.SystemClock;
+import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
@@ -23,6 +29,7 @@ import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
+import android.view.SurfaceView;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewTreeObserver;
@@ -36,9 +43,20 @@ import android.widget.Toast;
 import com.jenkolux.camerademo.R;
 import com.jenkolux.camerademo.camera2.Camera2Helper;
 import com.jenkolux.camerademo.camera2.Camera2Listener;
+import com.jenkolux.camerademo.camera2.DetectAnsyTask;
+import com.jenkolux.camerademo.camera2.ShowAnsyTask;
 import com.jenkolux.camerademo.camera2.util.ImageUtil;
+import com.jenkolux.facedetect.StartEngineTask;
+import com.jenkolux.util.JlxScreenUtil;
+import com.jlx.face.InitAiEngine;
+import com.jlx.status.JlxTaskBox;
+import com.jlx.utils.ImageUtils;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -46,7 +64,15 @@ public class MainActivity extends AppCompatActivity implements ViewTreeObserver.
     private static final String TAG = "MainActivity";
     private static final int ACTION_REQUEST_PERMISSIONS = 1;
     private Camera2Helper camera2Helper;
-    private TextureView textureView;
+    private SurfaceView     textureView;
+
+    //用于显示人脸框
+    private     SurfaceView msurfaceView;
+    public      static int SCREEN_WIDTH;
+    public      static int SCREEN_HEIGHT;
+
+    private     DisplayMetrics metrics;
+
     // 用于显示原始预览数据
     private ImageView ivOriginFrame;
     // 用于显示和预览画面相同的图像数据
@@ -64,18 +90,23 @@ public class MainActivity extends AppCompatActivity implements ViewTreeObserver.
     // 当前获取的帧数
     private int currentIndex = 0;
     // 处理的间隔帧
-    private static final int PROCESS_INTERVAL = 30;
+    private static final int PROCESS_INTERVAL = 2;
     // 线程池
     private ExecutorService imageProcessExecutor;
+    private ExecutorService detectExecutor;
+    private ExecutorService showExecutor;
     // 需要的权限
     private static final String[] NEEDED_PERMISSIONS = new String[]{
-            Manifest.permission.CAMERA
+            Manifest.permission.CAMERA,
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
     };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_camera2);
+
         //隐藏标题栏
         ActionBar actionBar = getSupportActionBar();
         actionBar.hide();
@@ -83,11 +114,32 @@ public class MainActivity extends AppCompatActivity implements ViewTreeObserver.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LOCKED);
         imageProcessExecutor = Executors.newSingleThreadExecutor();
         initView();
+
+        new StartEngineTask().execute();
+        detectExecutor = Executors.newSingleThreadExecutor();
+        detectExecutor.submit(new DetectAnsyTask(getApplicationContext()));
+
+        showExecutor = Executors.newSingleThreadExecutor();
+        showExecutor.submit(new ShowAnsyTask(msurfaceView.getHolder()));
+
+        //new InitAiEngine(getApplicationContext()).execute();
     }
 
     private void initView() {
+        msurfaceView = findViewById(R.id.cover_top);
+
+        msurfaceView.getHolder().setFormat(PixelFormat.TRANSLUCENT);
+        msurfaceView.setZOrderMediaOverlay(true);
+
         textureView = findViewById(R.id.texture_preview);
         textureView.getViewTreeObserver().addOnGlobalLayoutListener(this);
+
+        //配置　屏幕参数...
+        metrics = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getMetrics(metrics);
+
+        SCREEN_WIDTH  = metrics.widthPixels;
+        SCREEN_HEIGHT = metrics.heightPixels;
     }
 
     private boolean checkPermissions(String[] neededPermissions) {
@@ -197,10 +249,6 @@ public class MainActivity extends AppCompatActivity implements ViewTreeObserver.
                 ivOriginFrame.setLayoutParams(originLayoutParams);
                 tvOrigin.setLayoutParams(originLayoutParams);
 
-//                ((FrameLayout) textureView.getParent()).addView(ivPreviewFrame);
-//                ((FrameLayout) textureView.getParent()).addView(ivOriginFrame);
-//                ((FrameLayout) textureView.getParent()).addView(tvPreview);
-//                ((FrameLayout) textureView.getParent()).addView(tvOrigin);
             }
         });
     }
@@ -209,8 +257,7 @@ public class MainActivity extends AppCompatActivity implements ViewTreeObserver.
     @Override
     public void onPreview(final byte[] y, final byte[] u, final byte[] v, final Size previewSize, final int stride) {
         if (currentIndex++ % PROCESS_INTERVAL == 0) {
-            Log.i(TAG," preview index :" + currentIndex);
-
+            //Log.i(TAG," preview index :" + currentIndex);
             imageProcessExecutor.execute(new Runnable() {
                 @Override
                 public void run() {
@@ -220,46 +267,58 @@ public class MainActivity extends AppCompatActivity implements ViewTreeObserver.
                     // 回传数据是YUV422
                     if (y.length / u.length == 2) {
                         ImageUtil.yuv422ToYuv420sp(y, u, v, nv21, stride, previewSize.getHeight());
+                        //Log.i(TAG,"on prview data  type is  YUV422     width : "+ previewSize.getWidth() + " Height : " + previewSize.getHeight());
                     }
                     // 回传数据是YUV420
                     else if (y.length / u.length == 4) {
                         ImageUtil.yuv420ToYuv420sp(y, u, v, nv21, stride, previewSize.getHeight());
+                        //Log.i(TAG,"on prview data  type is   YUV420");
                     }
-                    YuvImage yuvImage = new YuvImage(nv21, ImageFormat.NV21, stride, previewSize.getHeight(), new int[]{stride, stride, stride});
+
+                    if (JlxTaskBox.JLX_THREADPOOL_TASK_STATUS == JlxTaskBox.JLX_THREADPOOL_TASK_DONE) {
+                        DetectAnsyTask.bg.offer(nv21);
+                    }else{
+                        Log.e(TAG,"TASK_STATUS "+ JlxTaskBox.JLX_THREADPOOL_TASK_STATUS);
+                    }
+
+                    //YuvImage yuvImage = new YuvImage(nv21, ImageFormat.NV21, stride, previewSize.getHeight(), new int[]{stride, stride, stride});
                     // ByteArrayOutputStream的close中其实没做任何操作，可不执行
-                    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                    //ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
 
                     // 由于某些stride和previewWidth差距大的分辨率，[0,previewWidth)是有数据的，而[previewWidth,stride)补上的U、V均为0，因此在这种情况下运行会看到明显的绿边
 //                    yuvImage.compressToJpeg(new Rect(0, 0, stride, previewSize.getHeight()), 100, byteArrayOutputStream);
 
                     // 由于U和V一般都有缺损，因此若使用方式，可能会有个宽度为1像素的绿边
-                    yuvImage.compressToJpeg(new Rect(0, 0, previewSize.getWidth(), previewSize.getHeight()), 100, byteArrayOutputStream);
+                    //yuvImage.compressToJpeg(new Rect(0, 0, previewSize.getWidth(), previewSize.getHeight()), 100, byteArrayOutputStream);
+
 
                     // 为了删除绿边，抛弃一行像素
 //                    yuvImage.compressToJpeg(new Rect(0, 0, previewSize.getWidth() - 1, previewSize.getHeight()), 100, byteArrayOutputStream);
 
-                    byte[] jpgBytes = byteArrayOutputStream.toByteArray();
-                    BitmapFactory.Options options = new BitmapFactory.Options();
-                    options.inSampleSize = 4;
+                    //byte[] jpgBytes = byteArrayOutputStream.toByteArray();
+                    //BitmapFactory.Options options = new BitmapFactory.Options();
+                    //options.inSampleSize = 4;
                     // 原始预览数据生成的bitmap
-                    final Bitmap originalBitmap = BitmapFactory.decodeByteArray(jpgBytes, 0, jpgBytes.length, options);
-                    Matrix matrix = new Matrix();
+                    //final Bitmap originalBitmap = BitmapFactory.decodeByteArray(jpgBytes, 0, jpgBytes.length, options);
+                   // Matrix matrix = new Matrix();
                     // 预览相对于原数据可能有旋转
-                    matrix.postRotate(Camera2Helper.CAMERA_ID_BACK.equals(openedCameraId) ? displayOrientation : -displayOrientation);
+                    //matrix.postRotate(Camera2Helper.CAMERA_ID_BACK.equals(openedCameraId) ? displayOrientation : -displayOrientation);
 
                     // 对于前置数据，镜像处理；若手动设置镜像预览，则镜像处理；若都有，则不需要镜像处理
-                    if (Camera2Helper.CAMERA_ID_FRONT.equals(openedCameraId) ^ isMirrorPreview) {
-                        matrix.postScale(-1, 1);
-                    }
+//                    if (Camera2Helper.CAMERA_ID_FRONT.equals(openedCameraId) ^ isMirrorPreview) {
+//                        matrix.postScale(-1, 1);
+//                    }
+
                     // 和预览画面相同的bitmap
-                    final Bitmap previewBitmap = Bitmap.createBitmap(originalBitmap, 0, 0, originalBitmap.getWidth(), originalBitmap.getHeight(), matrix, false);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            ivOriginFrame.setImageBitmap(originalBitmap);
-                            ivPreviewFrame.setImageBitmap(previewBitmap);
-                        }
-                    });
+//                    final Bitmap previewBitmap = Bitmap.createBitmap(originalBitmap, 0, 0, originalBitmap.getWidth(), originalBitmap.getHeight(), matrix, false);
+//                    runOnUiThread(new Runnable() {
+//                        @Override
+//                        public void run() {
+//                            //ivOriginFrame.setImageBitmap(originalBitmap);
+//                            //ivPreviewFrame.setImageBitmap(previewBitmap);
+//                            Log.i(TAG,"This is runONUiThread ");
+//                        }
+//                    });
                 }
             });
         }
@@ -273,6 +332,11 @@ public class MainActivity extends AppCompatActivity implements ViewTreeObserver.
     @Override
     public void onCameraError(Exception e) {
         e.printStackTrace();
+    }
+
+
+    @Override
+    public void onPreviewData(byte[] nv21, Size previewSize) {
     }
 
     @Override
@@ -292,4 +356,5 @@ public class MainActivity extends AppCompatActivity implements ViewTreeObserver.
             camera2Helper.switchCamera();
         }
     }
+
 }

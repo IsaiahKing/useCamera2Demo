@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
 import android.graphics.Point;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
@@ -21,10 +22,15 @@ import android.support.annotation.NonNull;
 import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.TextureView;
+import android.view.View;
 
 
+import com.jenkolux.util.JlxScreenUtil;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -46,7 +52,7 @@ public class Camera2Helper {
     private String mCameraId;
     private String specificCameraId;
     private Camera2Listener camera2Listener;
-    private TextureView mTextureView;
+    private View mCameraView;
     private int rotation;
     private Point previewViewSize;
     private Point specificPreviewSize;
@@ -65,7 +71,7 @@ public class Camera2Helper {
     private Size mPreviewSize;
 
     private Camera2Helper(Camera2Helper.Builder builder) {
-        mTextureView = builder.previewDisplayView;
+        mCameraView = builder.previewDisplayView;
         specificCameraId = builder.specificCameraId;
         camera2Listener = builder.camera2Listener;
         rotation = builder.rotation;
@@ -73,11 +79,17 @@ public class Camera2Helper {
         specificPreviewSize = builder.previewSize;
         maxPreviewSize = builder.maxPreviewSize;
         minPreviewSize = builder.minPreviewSize;
-        isMirror = builder.isMirror;
-        context = builder.context;
-        if (isMirror) {
-            mTextureView.setScaleX(-1);
+
+        if (builder.previewDisplayView instanceof TextureView) {
+            isMirror = builder.isMirror;
+            if(isMirror){
+                mCameraView.setScaleX(-1);
+            }
+        } else if (isMirror) {
+            throw new RuntimeException("mirror is effective only when the preview is on a textureView");
         }
+
+        context = builder.context;
     }
 
     public void switchCamera() {
@@ -146,6 +158,23 @@ public class Camera2Helper {
 
     };
 
+    private final SurfaceHolder.Callback mSurfaceCallBack = new SurfaceHolder.Callback() {
+        @Override
+        public void surfaceCreated(SurfaceHolder holder) {
+            openCamera();
+        }
+
+        @Override
+        public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+            configureTransform(width, height);
+        }
+        @Override
+        public void surfaceDestroyed(SurfaceHolder holder) {
+
+        }
+    };
+
+
     private CameraDevice.StateCallback mDeviceStateCallback = new CameraDevice.StateCallback() {
 
         @Override
@@ -157,6 +186,9 @@ public class Camera2Helper {
             createCameraPreviewSession();
             if (camera2Listener != null) {
                 camera2Listener.onCameraOpened(cameraDevice, mCameraId, mPreviewSize, getCameraOri(rotation, mCameraId), isMirror);
+
+                //add
+                JlxScreenUtil.setPreWidthHeight(mPreviewSize.getWidth(),mPreviewSize.getHeight());
             }
         }
 
@@ -314,11 +346,22 @@ public class Camera2Helper {
         // available, and "onSurfaceTextureAvailable" will not be called. In that case, we can open
         // a camera and start preview from here (otherwise, we wait until the surface is ready in
         // the SurfaceTextureListener).
-        if (mTextureView.isAvailable()) {
-            openCamera();
-        } else {
-            mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
+
+        if(mCameraView instanceof  TextureView){
+            if(((TextureView) mCameraView).isAvailable()){
+                openCamera();
+            }else{
+                ((TextureView) mCameraView).setSurfaceTextureListener(mSurfaceTextureListener);
+            }
         }
+        if(mCameraView instanceof SurfaceView){
+            if(mCameraView.isActivated()){
+                openCamera();
+            }else {
+                ((SurfaceView) mCameraView).getHolder().addCallback(mSurfaceCallBack);
+            }
+        }
+
     }
 
     public synchronized void stop() {
@@ -331,7 +374,7 @@ public class Camera2Helper {
 
     public void release() {
         stop();
-        mTextureView = null;
+        mCameraView = null;
         camera2Listener = null;
         context = null;
     }
@@ -367,7 +410,14 @@ public class Camera2Helper {
         if (map == null) {
             return false;
         }
-        mPreviewSize = getBestSupportedSize(new ArrayList<Size>(Arrays.asList(map.getOutputSizes(SurfaceTexture.class))));
+
+        if(mCameraView instanceof TextureView){
+            mPreviewSize = getBestSupportedSize(new ArrayList<Size>(Arrays.asList(map.getOutputSizes(SurfaceTexture.class))));
+        }else if(mCameraView instanceof SurfaceView){
+            mPreviewSize = getBestSupportedSize(new ArrayList<Size>(Arrays.asList(map.getOutputSizes(SurfaceHolder.class))));
+        }
+
+
         mImageReader = ImageReader.newInstance(mPreviewSize.getWidth(), mPreviewSize.getHeight(),
                 ImageFormat.YUV_420_888, 2);
         mImageReader.setOnImageAvailableListener(
@@ -381,7 +431,7 @@ public class Camera2Helper {
     private void openCamera() {
         CameraManager cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
         setUpCameraOutputs(cameraManager);
-        configureTransform(mTextureView.getWidth(), mTextureView.getHeight());
+        configureTransform(mCameraView.getWidth(), mCameraView.getHeight());
         try {
             if (!mCameraOpenCloseLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
                 throw new RuntimeException("Time out waiting to lock camera opening.");
@@ -460,29 +510,48 @@ public class Camera2Helper {
      */
     private void createCameraPreviewSession() {
         try {
-            SurfaceTexture texture = mTextureView.getSurfaceTexture();
-            assert texture != null;
+            if(mCameraView instanceof TextureView){
+                SurfaceTexture texture = ((TextureView) mCameraView).getSurfaceTexture();
+                assert texture != null;
 
-            // We configure the size of default buffer to be the size of camera preview we want.
-            texture.setDefaultBufferSize(mPreviewSize.getWidth(), mPreviewSize.getHeight());
+                texture.setDefaultBufferSize(mPreviewSize.getWidth(), mPreviewSize.getHeight());
 
-            // This is the output Surface we need to start preview.
-            Surface surface = new Surface(texture);
+                // This is the output Surface we need to start preview.
+                Surface surface = new Surface(texture);
 
-            // We set up a CaptureRequest.Builder with the output Surface.
-            mPreviewRequestBuilder
-                    = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+                // We set up a CaptureRequest.Builder with the output Surface.
+                mPreviewRequestBuilder
+                        = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
 
-            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
-                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+                mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
 
-            mPreviewRequestBuilder.addTarget(surface);
-            mPreviewRequestBuilder.addTarget(mImageReader.getSurface());
 
-            // Here, we create a CameraCaptureSession for camera preview.
-            mCameraDevice.createCaptureSession(Arrays.asList(surface, mImageReader.getSurface()),
-                    mCaptureStateCallback, mBackgroundHandler
-            );
+                mPreviewRequestBuilder.addTarget(surface);
+                mPreviewRequestBuilder.addTarget(mImageReader.getSurface());
+                // Here, we create a CameraCaptureSession for camera preview.
+                mCameraDevice.createCaptureSession(Arrays.asList(surface, mImageReader.getSurface()),
+                        mCaptureStateCallback, mBackgroundHandler
+                );
+            }
+
+            if(mCameraView instanceof SurfaceView){
+                mPreviewRequestBuilder
+                        = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+
+                mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+
+                mPreviewRequestBuilder.addTarget(((SurfaceView) mCameraView).getHolder().getSurface());
+                mPreviewRequestBuilder.addTarget(mImageReader.getSurface());
+
+                // Here, we create a CameraCaptureSession for camera preview.
+                mCameraDevice.createCaptureSession(Arrays.asList(((SurfaceView) mCameraView).getHolder().getSurface(), mImageReader.getSurface()),
+                        mCaptureStateCallback, mBackgroundHandler
+                );
+
+            }
+
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -497,7 +566,7 @@ public class Camera2Helper {
      * @param viewHeight The height of `mTextureView`
      */
     private void configureTransform(int viewWidth, int viewHeight) {
-        if (null == mTextureView || null == mPreviewSize) {
+        if (null == mCameraView || null == mPreviewSize) {
             return;
         }
         Matrix matrix = new Matrix();
@@ -517,15 +586,18 @@ public class Camera2Helper {
             matrix.postRotate(180, centerX, centerY);
         }
         Log.i(TAG, "configureTransform: " + getCameraOri(rotation, mCameraId) + "  " + rotation * 90);
-        mTextureView.setTransform(matrix);
+
+        if(mCameraView instanceof  TextureView){
+            ((TextureView) mCameraView).setTransform(matrix);
+        }
     }
 
     public static final class Builder {
 
         /**
-         * 预览显示的view，目前仅支持textureView
+         * 预览显示的view，目前仅支持surfaceView和textureView
          */
-        private TextureView previewDisplayView;
+        private View previewDisplayView;
 
         /**
          * 是否镜像显示，只支持textureView
@@ -568,9 +640,16 @@ public class Camera2Helper {
         }
 
 
-        public Builder previewOn(TextureView val) {
-            previewDisplayView = val;
-            return this;
+        public Builder previewOn(View val) {
+            if(val == null){
+                return this;
+            }
+            if (val instanceof SurfaceView || val instanceof TextureView) {
+                previewDisplayView = val;
+                return this;
+            } else {
+                throw new RuntimeException("you must preview on a textureView or a surfaceView");
+            }
         }
 
 
@@ -639,6 +718,21 @@ public class Camera2Helper {
         }
     }
 
+    private static final int COLOR_FormatI420 = 1;
+    private static final int COLOR_FormatNV21 = 2;
+    private static final boolean VERBOSE = true;
+
+    private static boolean isImageFormatSupported(Image image) {
+        int format = image.getFormat();
+        switch (format) {
+            case ImageFormat.YUV_420_888:
+            case ImageFormat.NV21:
+            case ImageFormat.YV12:
+                return true;
+        }
+        return false;
+    }
+
     private class OnImageAvailableListenerImpl implements ImageReader.OnImageAvailableListener {
         private byte[] y;
         private byte[] u;
@@ -665,6 +759,7 @@ public class Camera2Helper {
                     planes[2].getBuffer().get(v);
                     camera2Listener.onPreview(y, u, v, mPreviewSize, planes[0].getRowStride());
                 }
+
                 lock.unlock();
             }
             image.close();
