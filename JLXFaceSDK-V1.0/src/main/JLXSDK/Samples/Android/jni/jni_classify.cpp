@@ -1,6 +1,6 @@
 #include "jni_classify.hpp"
 #include "Samples.hpp"
-#include "coffeecatch.h"
+//#include "coffeecatch.h"
 #include <android/log.h>
 #include <facedetect/src/main/cpp/mtcnn.h>
 
@@ -203,7 +203,7 @@ static JNIEXPORT jint JNICALL JLXFaceRegister(JNIEnv* env, jobject obj,
  */
 static JNIEXPORT jobject JNICALL JLXFacePredict(JNIEnv* env, jobject obj,
                                     jbyteArray imgData){
-    COFFEE_TRY() {
+    //COFFEE_TRY() {
         cv::Mat     m_bgr;
         JLX::util::byteArray2bgr(env,obj,imgData,m_bgr);
 
@@ -261,16 +261,15 @@ static JNIEXPORT jobject JNICALL JLXFacePredict(JNIEnv* env, jobject obj,
         }
         env->DeleteLocalRef(f_jstr);
     }
-    COFFEE_CATCH()
-    {
+
         /** Caught a signal. **/
-        const char*const message = coffeecatch_get_message();
+       // const char*const message = coffeecatch_get_message();
 //        fprintf(stderr, "**FATAL ERROR: %s\n", message);
-        LOG(ERROR) << "**FATAL ERROR:" << message;
-    }
-    COFFEE_END();
-    return nullptr;
-}
+       // LOG(ERROR) << "**FATAL ERROR:" << message;
+
+
+    //return nullptr;
+
 
 
 //得到人脸特征

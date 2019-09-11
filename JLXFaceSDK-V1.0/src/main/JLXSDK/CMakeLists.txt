@@ -10,9 +10,9 @@ set(JNI_JLXSDK_INCLUDE ${JNI_JLXSDK_SRC_MAIN}/Include)
 set(JNI_JLXSDK_LIB ${JNI_JLXSDK_SRC_MAIN}/Lib/Android)
 
 #添加coffee catch date:03-07
-set(COFFEE_CATCH_DIR ${JNI_JLXSDK_SRC}/coffeecatch)
+#set(COFFEE_CATCH_DIR ${JNI_JLXSDK_SRC}/coffeecatch)
 
-include_directories(${JNI_JLXSDK_INCLUDE} ${JNI_JLXSDK_SRC} ${COFFEE_CATCH_DIR} ${JNI_JLXSDK_INTERFACE_SRC}/include)
+include_directories(${JNI_JLXSDK_INCLUDE} ${JNI_JLXSDK_SRC}  ${JNI_JLXSDK_INTERFACE_SRC}/include)
 
 #add opencv so path and include file
 set(EXT_DIR ../../../../jlx_third_party/third_party)
@@ -138,9 +138,7 @@ add_library(jlx_classify SHARED
 		    ${JNI_JLXSDK_SRC}/Sample/TensorflowModels.cpp
 			${SAMPLE_FILE_COMPILE_CODE}
 			${GLOG_PATH}/logging.cc
-		    ${JNI_COMMON_JSON_SOURCES}
-			${COFFEE_CATCH_DIR}/coffeecatch.c
-			${COFFEE_CATCH_DIR}/coffeejni.c)
+		    ${JNI_COMMON_JSON_SOURCES})
 
 if(USE_VULKAN_FLAGS)
 	target_link_libraries(jlx_classify
